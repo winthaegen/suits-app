@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Suits: de stand</title>
+<!--
+  De openbare statuspagina van Suits (wens 2 en de beloftes van het superplan: een openbare
+  statuspagina met historie, na elke storing een korte uitleg). Ze wordt met de app mee
+  gebouwd (Vite zet alles uit public/ ongewijzigd naast de app) en leest de functie status op
+  de server, zonder sleutel. Wat er staat, zet het team van Suits bij /beheer.
+
+  Op deze computer (localhost) en met ?voorbeeld=1 toont ze een voorbeeld en vraagt ze niets
+  aan de server; met ?echt=1 vraagt ze het toch. Kleur draagt nooit de betekenis: de stand staat
+  er altijd in woorden. Zie docs/beheer.md.
+-->
+<style>
+:root{
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  --font-kop:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",Arial,sans-serif;
+  --bg:#f5f5f7;--vlak:#ffffff;--zacht:#f5f5f7;
+  --inkt:#1d1d1f;--inkt-2:#424245;--inkt-3:#6e6e73;
+  --lijn:#e5e5ea;--lijn-sterk:#d2d2d7;
+  --blauw:#0071e3;--blauw-zacht:#eef5fd;
+  --schaduw:0 1px 3px rgba(0,0,0,.07);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);font-size:15px;line-height:1.5;color:var(--inkt);background:var(--bg);-webkit-font-smoothing:antialiased}
+.blad{max-width:760px;margin:0 auto;padding:48px 24px 64px}
+.merk{display:flex;align-items:center;gap:10px;margin-bottom:28px}
+.merk-teken{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--inkt);color:#fff;font-size:16px;font-weight:700}
+.merk-naam{font-family:var(--font-kop);font-size:21px;font-weight:700;letter-spacing:-.02em}
+h1{font-family:var(--font-kop);font-size:34px;font-weight:700;line-height:1.1;letter-spacing:-.022em}
+h2{font-family:var(--font-kop);font-size:20px;font-weight:600;line-height:1.2;letter-spacing:-.015em;margin-bottom:12px}
+.sub{margin-top:8px;color:var(--inkt-2);font-size:17px}
+.klein{font-size:13px;color:var(--inkt-3)}
+.kaart{margin-top:24px;padding:22px 26px;border-radius:18px;background:var(--vlak);box-shadow:var(--schaduw)}
+.stand{display:flex;align-items:center;gap:14px;padding-bottom:12px}
+.stand-teken{flex:none;display:grid;place-items:center;width:40px;height:40px;border-radius:50%;border:2px solid var(--inkt);font-size:20px;font-weight:700}
+.stand-teken svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.stand-woord{font-family:var(--font-kop);font-size:24px;font-weight:700}
+.woord{display:inline-flex;align-items:center;padding:2px 10px;border:1px solid var(--lijn-sterk);border-radius:999px;font-size:13px;font-weight:600;color:var(--inkt-2);background:var(--zacht)}
+.storing{padding:14px 0;border-top:1px solid var(--lijn)}
+.storing:first-of-type{border-top:0;padding-top:0}
+.storing-kop{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.storing-titel{font-weight:600}
+.storing-uitleg{margin-top:4px;color:var(--inkt-2);white-space:pre-wrap}
+.leeg{color:var(--inkt-2)}
+.etiket{display:inline-block;margin-bottom:16px;padding:4px 12px;border-radius:999px;border:1px dashed var(--inkt-3);font-size:13px;font-weight:600;color:var(--inkt-2)}
+.voet{margin-top:28px}
+a{color:var(--blauw)}
+@media (max-width:600px){.blad{padding:28px 16px 48px}h1{font-size:28px}.kaart{padding:18px}}
+</style>
+</head>
+<body>
+<main class="blad">
+  <div class="merk"><span class="merk-teken" aria-hidden="true">S</span><span class="merk-naam">Suits</span></div>
+  <div id="etiket"></div>
+  <h1>De stand van Suits</h1>
+  <p class="sub">Werkt alles? Hier staat het, met wat er de laatste 90 dagen was.</p>
+
+  <section class="kaart" aria-label="Nu" id="nu">
+    <p class="leeg">De stand wordt opgehaald.</p>
+  </section>
+  <section class="kaart" aria-label="Gepland" id="gepland" hidden></section>
+  <section class="kaart" aria-label="De laatste 90 dagen" id="historie" hidden></section>
+
+  <p class="klein voet" id="bijgewerkt"></p>
+  <p class="klein">Merk je iets dat hier niet staat? Gebruik de feedbackknop in Suits, of mail het team van Suits.</p>
+</main>
+<script>
+(function () {
+  // Het adres van de functie status. Komt er een eigen omgeving voor echte kantoren, zet dan
+  // hier het adres van die omgeving.
+  var ADRES = 'https://awdbxozugtsojzfsoqhn.supabase.co/functions/v1/status';
+  var ZONE = 'Europe/Amsterdam';
+
+  function wanneer(tijd) {
+    return new Intl.DateTimeFormat('nl-NL', { timeZone: ZONE, weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(tijd));
+  }
+  function klok(tijd) {
+    return new Intl.DateTimeFormat('nl-NL', { timeZone: ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(tijd));
+  }
+  function dag(tijd) {
+    return new Intl.DateTimeFormat('nl-NL', { timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(tijd));
+  }
+  function ernst(woord) {
+    return { onderhoud: 'Onderhoud', hinder: 'Hinder', storing: 'Storing' }[woord] || 'Storing';
+  }
+  function maak(soort, klasse, tekst) {
+    var el = document.createElement(soort);
+    if (klasse) el.className = klasse;
+    if (tekst !== undefined && tekst !== null) el.textContent = tekst;
+    return el;
+  }
+  function periode(s) {
+    if (!s.einde) return 'Sinds ' + wanneer(s.begin);
+    return wanneer(s.begin) + ' tot ' + (dag(s.einde) === dag(s.begin) ? klok(s.einde) : wanneer(s.einde));
+  }
+  function storing(s, stand) {
+    var el = maak('div', 'storing');
+    el.setAttribute('role', 'group');
+    el.setAttribute('aria-label', s.titel);
+    var kop = maak('div', 'storing-kop');
+    kop.appendChild(maak('span', 'storing-titel', s.titel));
+    kop.appendChild(maak('span', 'woord', stand + ', ' + ernst(s.ernst).toLowerCase()));
+    el.appendChild(kop);
+    el.appendChild(maak('div', 'klein', periode(s)));
+    if (s.uitleg) el.appendChild(maak('p', 'storing-uitleg', s.uitleg));
+    return el;
+  }
+  function lijst(id, kop, items, stand, leeg) {
+    var vak = document.getElementById(id);
+    vak.textContent = '';
+    if (!items.length && !leeg) {
+      vak.hidden = true;
+      return;
+    }
+    vak.hidden = false;
+    vak.appendChild(maak('h2', '', kop));
+    if (!items.length) vak.appendChild(maak('p', 'leeg', leeg));
+    items.forEach(function (s) { vak.appendChild(storing(s, stand)); });
+  }
+
+  // Toont een stand zoals de functie status hem geeft.
+  function toon(status) {
+    var nu = document.getElementById('nu');
+    nu.textContent = '';
+    var rij = maak('div', 'stand');
+    var goed = status.stand === 'Alles werkt';
+    var teken = maak('span', 'stand-teken', goed ? null : '!');
+    teken.setAttribute('aria-hidden', 'true');
+    if (goed) {
+      var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      var pad = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      pad.setAttribute('d', 'M5 12.5l4.5 4.5L19 7.5');
+      svg.appendChild(pad);
+      teken.appendChild(svg);
+    }
+    rij.appendChild(teken);
+    var woord = maak('span', 'stand-woord', status.stand);
+    woord.setAttribute('role', 'status');
+    rij.appendChild(woord);
+    nu.appendChild(rij);
+    (status.nu || []).forEach(function (s) { nu.appendChild(storing(s, 'Loopt')); });
+    if (goed) nu.appendChild(maak('p', 'leeg', 'Er is nu geen storing en geen onderhoud.'));
+    lijst('gepland', 'Gepland', status.gepland || [], 'Gepland', '');
+    lijst('historie', 'De laatste 90 dagen', status.historie || [], 'Opgelost', 'Er was geen storing in de laatste 90 dagen.');
+    document.getElementById('bijgewerkt').textContent = 'Bijgewerkt om ' + klok(status.bijgewerkt_op) + '. De pagina kijkt elke minuut opnieuw.';
+  }
+
+  function fout() {
+    var nu = document.getElementById('nu');
+    nu.textContent = '';
+    var p = maak('p', 'leeg', 'De stand kon nu niet worden opgehaald. Dat kan aan je verbinding liggen, of aan Suits. De pagina probeert het over een minuut opnieuw.');
+    p.setAttribute('role', 'alert');
+    nu.appendChild(p);
+  }
+
+  // Een voorbeeld, verzonnen, voor op deze computer: zo is de pagina te zien zonder server.
+  function voorbeeld(nu) {
+    var uur = 3600000;
+    return {
+      stand: 'Er is hinder',
+      bijgewerkt_op: new Date(nu).toISOString(),
+      nu: [{ titel: 'Inloggen gaat traag', uitleg: 'De tweede stap duurt soms een halve minuut. We zoeken het uit; er gaat niets verloren.', begin: new Date(nu - uur).toISOString(), einde: null, ernst: 'hinder' }],
+      gepland: [{ titel: 'Onderhoud aan de database', uitleg: 'Suits is dan een kwartier niet te gebruiken.', begin: new Date(nu + 40 * uur).toISOString(), einde: new Date(nu + 40.5 * uur).toISOString(), ernst: 'onderhoud' }],
+      historie: [{ titel: 'Mail kwam niet binnen', uitleg: 'Een koppeling met Microsoft viel een uur weg. Daarna is alle mail alsnog opgehaald; er is niets verloren.', begin: new Date(nu - 17 * 24 * uur).toISOString(), einde: new Date(nu - 17 * 24 * uur + 70 * 60000).toISOString(), ernst: 'storing' }],
+    };
+  }
+
+  function haal() {
+    return fetch(ADRES, { headers: { Accept: 'application/json' } })
+      .then(function (r) { if (!r.ok) throw new Error('stand ' + r.status); return r.json(); })
+      .then(toon)
+      .catch(fout);
+  }
+
+  var zoek = new URLSearchParams(location.search);
+  var lokaal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  var alsVoorbeeld = zoek.get('voorbeeld') === '1' || (lokaal && zoek.get('echt') !== '1');
+  window.SuitsStatus = { toon: toon, fout: fout, haal: haal, voorbeeld: voorbeeld };
+  if (alsVoorbeeld) {
+    var e = document.getElementById('etiket');
+    e.appendChild(maak('span', 'etiket', 'Voorbeeld: verzonnen storingen, de server is niet gevraagd'));
+    toon(voorbeeld(Date.now()));
+  } else {
+    haal();
+    setInterval(haal, 60000);
+  }
+})();
+</script>
+</body>
+</html>
